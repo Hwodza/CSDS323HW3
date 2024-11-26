@@ -79,13 +79,18 @@ def assess_runtime(r, c, v, dense_matrix, num_tests=100):
         
         # Time sparse matrix-vector multiplication
         start_time = time.time()
-        vm_mult_sparse(r, c, v, vector)
+        sparse = vm_mult_sparse(r, c, v, vector)
         sparse_times.append(time.time() - start_time)
         
         # Time dense matrix-vector multiplication
         start_time = time.time()
-        vm_mult_dense(dense_matrix, vector)
+        dense = vm_mult_dense(dense_matrix, vector)
         dense_times.append(time.time() - start_time)
+        if not np.allclose(sparse, dense):
+            print("Error: Results do not match!")
+            print(sparse)
+            print(dense)
+            break
     
     sparse_mean = np.mean(sparse_times)
     sparse_variance = np.var(sparse_times)
