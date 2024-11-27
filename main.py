@@ -4,9 +4,127 @@ import matplotlib.pyplot as plt
 from scipy.linalg import eigh
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+from sklearn.linear_model import LogisticRegression
 
 n = 2708
+
+
+def create_sparse_adjacency_matrix(graph_file_path):
+    with open(graph_file_path, 'r') as file:
+        edges = file.readlines()
+    
+    edge_list = []
+    max_node = 0
+    for edge in edges:
+        node1, node2 = map(int, edge.strip().split(','))
+        edge_list.append((node1, node2))
+        max_node = max(max_node, node1, node2)
+    
+    row = []
+    col = []
+    data = []
+    for node1, node2 in edge_list:
+        row.append(node1)
+        col.append(node2)
+        data.append(1)
+        row.append(node2)
+        col.append(node1)
+        data.append(1)
+    
+    adjacency_matrix = sp.coo_matrix((data, (row, col)), shape=(max_node + 1, max_node + 1))
+    return adjacency_matrix.tocsr()
+
+
+def random_walk_with_restarts(W, i, alpha=0.5, tol=1e-6, max_iter=100):
+    n = W.shape[0]
+    e_i = np.zeros(n)
+    e_i[i] = 1
+    pi = e_i.copy()
+    
+    for _ in range(max_iter):
+        pi_new = alpha * W @ pi + (1 - alpha) * e_i
+        if np.linalg.norm(pi_new - pi, 1) < tol:
+            break
+        pi = pi_new
+    
+    return pi
+
+
+def von_neumann_proximity(A, i, l=3):
+    n = A.shape[0]
+    e_i = np.zeros(n)
+    e_i[i] = 1
+    vn = e_i.copy()
+    A_power = A.copy()
+    
+    for _ in range(l):
+        vn += A_power @ e_i
+        A_power = A_power @ A
+    
+    return vn
+
+
+def compare_runtimes(graph_file_path, num_nodes=100, alpha=0.5, l=3):
+    adjacency_matrix = create_sparse_adjacency_matrix(graph_file_path)
+    degree_matrix = sp.diags(1 / adjacency_matrix.sum(axis=1).A.ravel())
+    W = adjacency_matrix @ degree_matrix
+    
+    nodes = np.random.choice(adjacency_matrix.shape[0], num_nodes, replace=False)
+    
+    rwr_times = []
+    vn_times = []
+    
+    for i in nodes:
+        start_time = time.time()
+        random_walk_with_restarts(W, i, alpha=alpha)
+        rwr_times.append(time.time() - start_time)
+        
+        start_time = time.time()
+        von_neumann_proximity(adjacency_matrix, i, l=l)
+        vn_times.append(time.time() - start_time)
+    
+    rwr_mean = np.mean(rwr_times)
+    rwr_variance = np.var(rwr_times)
+    
+    vn_mean = np.mean(vn_times)
+    vn_variance = np.var(vn_times)
+    
+    return {
+        'rwr_mean': rwr_mean,
+        'rwr_variance': rwr_variance,
+        'vn_mean': vn_mean,
+        'vn_variance': vn_variance
+    }
+
+
+def visualize_proximity_comparison(results):
+    labels = ['RWR', 'VN']
+    means = [results['rwr_mean'], results['vn_mean']]
+    variances = [results['rwr_variance'], results['vn_variance']]
+    
+    x = np.arange(len(labels))
+    width = 0.35
+    
+    fig, ax = plt.subplots(2, 1, figsize=(12, 10))
+    
+    # Plot mean runtimes
+    ax[0].bar(x, means, width, label='Mean Runtime')
+    ax[0].set_ylabel('Time (seconds)')
+    ax[0].set_title('Mean Runtime of Proximity Computations')
+    ax[0].set_xticks(x)
+    ax[0].set_xticklabels(labels, rotation=45, ha='right')
+    
+    # Plot variances
+    ax[1].bar(x, variances, width, label='Variance of Runtime')
+    ax[1].set_ylabel('Time^2 (seconds^2)')
+    ax[1].set_title('Variance of Runtime of Proximity Computations')
+    ax[1].set_xticks(x)
+    ax[1].set_xticklabels(labels, rotation=45, ha='right')
+    
+    plt.tight_layout()
+    plt.show()
 
 
 def create_adjacency_matrix(graph_file_path):
@@ -61,6 +179,7 @@ def compute_embedding(laplacian_matrix, dimensions=1):
     
     # Get the corresponding eigenvectors
     embedding = eigenvectors[:, smallest_non_zero_eigenvalue_indices]
+    print(f'embedding: {embedding}')
     return embedding
 
 
@@ -125,6 +244,26 @@ def evaluate_classifier(embedding, labels, num_splits=5, test_size=0.2):
         
         class_intervals = train_classifier(X_train, y_train)
         y_pred = predict(class_intervals, X_test)
+        
+        accuracy = accuracy_score(y_test, y_pred)
+        accuracies.append(accuracy)
+    
+    mean_accuracy = np.mean(accuracies)
+    variance_accuracy = np.var(accuracies)
+    
+    return mean_accuracy, variance_accuracy
+
+
+def evaluate_classifier2(embedding, labels, num_splits=5, test_size=0.2):
+    accuracies = []
+    
+    for _ in range(num_splits):
+        X_train, X_test, y_train, y_test = train_test_split(embedding, labels, test_size=test_size, random_state=None)
+        
+        # Use Logistic Regression as the classifier
+        classifier = LogisticRegression(max_iter=1000)
+        classifier.fit(X_train, y_train)
+        y_pred = classifier.predict(X_test)
         
         accuracy = accuracy_score(y_test, y_pred)
         accuracies.append(accuracy)
@@ -243,6 +382,7 @@ def visualize_results(results):
     plt.tight_layout()
     plt.show()
 
+
 def visualize_comparison2(results):
     labels = ['2D', '5D', '10D']
     means = [results['mean_2d'], results['mean_5d'], results['mean_10d']]
@@ -269,6 +409,7 @@ def visualize_comparison2(results):
     
     plt.tight_layout()
     plt.show()
+
 
 def visualize_comparison(results):
     labels = ['Unnormalized Laplacian 1D', 'Normalized Laplacian 1D', 'Unnormalized Laplacian 2D', 'Normalized Laplacian 2D']
@@ -300,45 +441,64 @@ def visualize_comparison(results):
 
 def main():
     graph_file_path = 'graph.csv'
-    labels_file_path = 'nodelabels.csv'
     
-    adjacency_matrix = create_adjacency_matrix(graph_file_path)
-    laplacian_matrix = compute_laplacian_matrix(adjacency_matrix)
+    # Problem 3
+    # results = compare_runtimes(graph_file_path)
+    # print("Random Walk with Restarts (RWR):")
+    # print(f"Mean runtime: {results['rwr_mean']} seconds")
+    # print(f"Variance of runtime: {results['rwr_variance']} seconds^2")
     
-    # Load the labels
-    with open(labels_file_path, 'r') as file:
-        labels = np.array([int(line.strip()) for line in file.readlines()])
+    # print("Von Neumann (VN) Proximity:")
+    # print(f"Mean runtime: {results['vn_mean']} seconds")
+    # print(f"Variance of runtime: {results['vn_variance']} seconds^2")
     
-    # Compute embeddings for k = 2, 5, 10
-    embedding_2d = compute_embedding(laplacian_matrix, dimensions=2)
-    embedding_5d = compute_embedding(laplacian_matrix, dimensions=5)
-    embedding_10d = compute_embedding(laplacian_matrix, dimensions=10)
+    # visualize_proximity_comparison(results)
+
+
+    # Problem 2d
+    # graph_file_path = 'graph.csv'
+    # labels_file_path = 'nodelabels.csv'
     
-    # Evaluate classifiers
-    mean_accuracy_2d, variance_accuracy_2d = evaluate_classifier(embedding_2d, labels)
-    mean_accuracy_5d, variance_accuracy_5d = evaluate_classifier(embedding_5d, labels)
-    mean_accuracy_10d, variance_accuracy_10d = evaluate_classifier(embedding_10d, labels)
+    # adjacency_matrix = create_adjacency_matrix(graph_file_path)
+    # laplacian_matrix = compute_laplacian_matrix(adjacency_matrix)
     
-    print("2D Embedding:")
-    print(f"Mean accuracy: {mean_accuracy_2d}")
-    print(f"Variance of accuracy: {variance_accuracy_2d}")
-    print("5D Embedding:")
-    print(f"Mean accuracy: {mean_accuracy_5d}")
-    print(f"Variance of accuracy: {variance_accuracy_5d}")
-    print("10D Embedding:")
-    print(f"Mean accuracy: {mean_accuracy_10d}")
-    print(f"Variance of accuracy: {variance_accuracy_10d}")
+    # # Load the labels
+    # with open(labels_file_path, 'r') as file:
+    #     labels = np.array([int(line.strip()) for line in file.readlines()])
     
-    results = {
-        'mean_2d': mean_accuracy_2d,
-        'variance_2d': variance_accuracy_2d,
-        'mean_5d': mean_accuracy_5d,
-        'variance_5d': variance_accuracy_5d,
-        'mean_10d': mean_accuracy_10d,
-        'variance_10d': variance_accuracy_10d
-    }
+    # # Compute embeddings for k = 2, 5, 10
+    # embedding_2d = compute_embedding(laplacian_matrix, dimensions=2)
+    # embedding_5d = compute_embedding(laplacian_matrix, dimensions=5)
+    # embedding_10d = compute_embedding(laplacian_matrix, dimensions=10)
     
-    visualize_comparison2(results)
+    # # Evaluate classifiers
+    # mean_accuracy_2d, variance_accuracy_2d = evaluate_classifier2(embedding_2d, labels)
+    # mean_accuracy_5d, variance_accuracy_5d = evaluate_classifier2(embedding_5d, labels)
+    # mean_accuracy_10d, variance_accuracy_10d = evaluate_classifier2(embedding_10d, labels)
+    
+    # print("2D Embedding:")
+    # print(f"Mean accuracy: {mean_accuracy_2d}")
+    # print(f"Variance of accuracy: {variance_accuracy_2d}")
+    # print("5D Embedding:")
+    # print(f"Mean accuracy: {mean_accuracy_5d}")
+    # print(f"Variance of accuracy: {variance_accuracy_5d}")
+    # print("10D Embedding:")
+    # print(f"Mean accuracy: {mean_accuracy_10d}")
+    # print(f"Variance of accuracy: {variance_accuracy_10d}")
+    
+    # results = {
+    #     'mean_2d': mean_accuracy_2d,
+    #     'variance_2d': variance_accuracy_2d,
+    #     'mean_5d': mean_accuracy_5d,
+    #     'variance_5d': variance_accuracy_5d,
+    #     'mean_10d': mean_accuracy_10d,
+    #     'variance_10d': variance_accuracy_10d
+    # }
+    
+    # visualize_comparison2(results)
+
+
+    # Problem 2b,c
     # graph_file_path = 'graph.csv'
     # r, c, v = row_major(graph_file_path)
     # dense_matrix = create_adjacency_matrix(graph_file_path)
