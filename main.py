@@ -24,7 +24,7 @@ def create_adjacency_matrix(graph_file_path):
     for node1, node2 in edge_list:
         adjacency_matrix[node1][node2] = 1
         adjacency_matrix[node2][node1] = 1  # Since the graph is undirected
-    
+    print(adjacency_matrix)
     return adjacency_matrix
 
 
@@ -35,22 +35,25 @@ def row_major(graph_file_path):
     graph = [list(map(int, line.strip().split(','))) for line in graph]
     # print(graph)
     # print(len(graph))
-    r = [0] * n
+    r = [0] * (n+1)
     c = []
     v = []
     last = -1
     i = 0
     for line in graph:
         if line[1] > last:
-            r[line[1]] = i+1
+            r[line[1]] = i
             j = line[1] - last - 1
             for k in range(j):
-                r[last + k + 1] = i+1
+                r[last + k + 1] = i
             last = line[1]
+        i += 1
         c.append(line[0])
         v.append(1)
+    r[n] = i
     # print(r)
     # print(c)
+    
     return r, c, v
 
 
