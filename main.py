@@ -1,6 +1,10 @@
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+from scipy.linalg import eigh
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
 
 n = 2708
 
@@ -26,6 +30,81 @@ def create_adjacency_matrix(graph_file_path):
         adjacency_matrix[node2][node1] = 1  # Since the graph is undirected
     print(adjacency_matrix)
     return adjacency_matrix
+
+
+def create_degree_matrix(adjacency_matrix):
+    degree_matrix = np.diag(np.sum(adjacency_matrix, axis=1))
+    return degree_matrix
+
+
+def compute_laplacian_matrix(adjacency_matrix):
+    degree_matrix = create_degree_matrix(adjacency_matrix)
+    laplacian_matrix = degree_matrix - adjacency_matrix
+    return laplacian_matrix
+
+
+def compute_embedding(laplacian_matrix):
+    # Compute the eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = eigh(laplacian_matrix)
+    
+    # Find the index of the smallest non-zero eigenvalue
+    non_zero_eigenvalues = eigenvalues[eigenvalues > 1e-10]
+    smallest_non_zero_eigenvalue_index = np.where(eigenvalues == non_zero_eigenvalues[0])[0][0]
+    
+    # Get the corresponding eigenvector
+    embedding = eigenvectors[:, smallest_non_zero_eigenvalue_index]
+    return embedding
+
+
+def visualize_embedding(embedding, labels):
+    plt.figure(figsize=(10, 6))
+    scatter = plt.scatter(embedding, np.zeros_like(embedding), c=labels, cmap='viridis', s=50)
+    plt.colorbar(scatter, label='Class Label')
+    plt.xlabel('One-dimensional embedding')
+    plt.title('One-dimensional embedding of nodes with class labels')
+    plt.show()
+
+
+def train_classifier(embedding, labels):
+    class_intervals = {}
+    unique_labels = np.unique(labels)
+    
+    for label in unique_labels:
+        class_intervals[label] = (np.min(embedding[labels == label]), np.max(embedding[labels == label]))
+    
+    return class_intervals
+
+
+def predict(class_intervals, embedding):
+    predictions = []
+    for value in embedding:
+        predicted = False
+        for label, (low, high) in class_intervals.items():
+            if low <= value <= high:
+                predictions.append(label)
+                predicted = True
+                break
+        if not predicted:
+            predictions.append(-1)  # Assign a default class if no interval matches
+    return predictions
+
+
+def evaluate_classifier(embedding, labels, num_splits=5, test_size=0.2):
+    accuracies = []
+    
+    for _ in range(num_splits):
+        X_train, X_test, y_train, y_test = train_test_split(embedding, labels, test_size=test_size, random_state=None)
+        
+        class_intervals = train_classifier(X_train, y_train)
+        y_pred = predict(class_intervals, X_test)
+        
+        accuracy = accuracy_score(y_test, y_pred)
+        accuracies.append(accuracy)
+    
+    mean_accuracy = np.mean(accuracies)
+    variance_accuracy = np.var(accuracies)
+    
+    return mean_accuracy, variance_accuracy
 
 
 def row_major(graph_file_path):
@@ -155,6 +234,21 @@ def main():
     print(f"Mean runtime: {results['dense_mean']} seconds")
     print(f"Variance of runtime: {results['dense_variance']} seconds^2")
     visualize_results(results)
+
+    labels_file_path = 'nodelabels.csv'
+    
+    adjacency_matrix = create_adjacency_matrix(graph_file_path)
+    laplacian_matrix = compute_laplacian_matrix(adjacency_matrix)
+    embedding = compute_embedding(laplacian_matrix)
+    
+    # Load the labels
+    with open(labels_file_path, 'r') as file:
+        labels = [int(line.strip()) for line in file.readlines()]
+    
+    visualize_embedding(embedding, labels)
+    mean_accuracy, variance_accuracy = evaluate_classifier(embedding, labels)
+    print(f"Mean accuracy: {mean_accuracy}")
+    print(f"Variance of accuracy: {variance_accuracy}")
 
 
 if __name__ == '__main__':
