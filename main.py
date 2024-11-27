@@ -7,6 +7,8 @@ from sklearn.metrics import accuracy_score
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics.pairwise import cosine_similarity
+
 
 n = 2708
 
@@ -64,6 +66,78 @@ def von_neumann_proximity(A, i, l=3):
         A_power = A_power @ A
     
     return vn
+
+
+def compare_proximity_vectors(graph_file_path, num_nodes=100, alpha_values=[0.5], l_values=[3]):
+    adjacency_matrix = create_sparse_adjacency_matrix(graph_file_path)
+    degree_matrix = sp.diags(1 / adjacency_matrix.sum(axis=1).A.ravel())
+    W = adjacency_matrix @ degree_matrix
+    
+    nodes = np.random.choice(adjacency_matrix.shape[0], num_nodes, replace=False)
+    
+    results = []
+    
+    for alpha in alpha_values:
+        for l in l_values:
+            similarities = []
+            for i in nodes:
+                pi = random_walk_with_restarts(W, i, alpha=alpha)
+                sigma = von_neumann_proximity(adjacency_matrix, i, l=l)
+                similarity = cosine_similarity(pi.reshape(1, -1), sigma.reshape(1, -1))[0, 0]
+                similarities.append(similarity)
+            
+            mean_similarity = np.mean(similarities)
+            variance_similarity = np.var(similarities)
+            
+            results.append({
+                'alpha': alpha,
+                'l': l,
+                'mean_similarity': mean_similarity,
+                'variance_similarity': variance_similarity
+            })
+    
+    return results
+
+
+def visualize_similarity(results):
+    alphas = sorted(set(result['alpha'] for result in results))
+    ls = sorted(set(result['l'] for result in results))
+    
+    mean_similarities = np.zeros((len(alphas), len(ls)))
+    variance_similarities = np.zeros((len(alphas), len(ls)))
+    
+    for result in results:
+        alpha_idx = alphas.index(result['alpha'])
+        l_idx = ls.index(result['l'])
+        mean_similarities[alpha_idx, l_idx] = result['mean_similarity']
+        variance_similarities[alpha_idx, l_idx] = result['variance_similarity']
+    
+    fig, ax = plt.subplots(2, 1, figsize=(12, 10))
+    
+    # Plot mean similarities
+    im = ax[0].imshow(mean_similarities, cmap='viridis', aspect='auto')
+    ax[0].set_xticks(np.arange(len(ls)))
+    ax[0].set_yticks(np.arange(len(alphas)))
+    ax[0].set_xticklabels(ls)
+    ax[0].set_yticklabels(alphas)
+    ax[0].set_xlabel('l')
+    ax[0].set_ylabel('alpha')
+    ax[0].set_title('Mean Similarity between RWR and VN Proximity Vectors')
+    fig.colorbar(im, ax=ax[0])
+    
+    # Plot variance similarities
+    im = ax[1].imshow(variance_similarities, cmap='viridis', aspect='auto')
+    ax[1].set_xticks(np.arange(len(ls)))
+    ax[1].set_yticks(np.arange(len(alphas)))
+    ax[1].set_xticklabels(ls)
+    ax[1].set_yticklabels(alphas)
+    ax[1].set_xlabel('l')
+    ax[1].set_ylabel('alpha')
+    ax[1].set_title('Variance of Similarity between RWR and VN Proximity Vectors')
+    fig.colorbar(im, ax=ax[1])
+    
+    plt.tight_layout()
+    plt.show()
 
 
 def compare_runtimes(graph_file_path, num_nodes=100, alpha=0.5, l=3):
@@ -439,10 +513,152 @@ def visualize_comparison(results):
     plt.show()
 
 
+def consistency_measure(proximity_vector, labels):
+    weighted_labels = proximity_vector @ labels
+    return weighted_labels
+
+
+def compare_consistency(graph_file_path, labels_file_path, num_nodes=100, alpha_values=[0.5], l_values=[3]):
+    adjacency_matrix = create_sparse_adjacency_matrix(graph_file_path)
+    degree_matrix = sp.diags(1 / adjacency_matrix.sum(axis=1).A.ravel())
+    W = adjacency_matrix @ degree_matrix
+    
+    with open(labels_file_path, 'r') as file:
+        labels = np.array([int(line.strip()) for line in file.readlines()])
+    
+    nodes = np.random.choice(adjacency_matrix.shape[0], num_nodes, replace=False)
+    
+    results = []
+    
+    for alpha in alpha_values:
+        for l in l_values:
+            rwr_consistencies = []
+            vn_consistencies = []
+            for i in nodes:
+                pi = random_walk_with_restarts(W, i, alpha=alpha)
+                sigma = von_neumann_proximity(adjacency_matrix, i, l=l)
+                
+                rwr_consistency = consistency_measure(pi, labels)
+                vn_consistency = consistency_measure(sigma, labels)
+                
+                rwr_consistencies.append(rwr_consistency)
+                vn_consistencies.append(vn_consistency)
+            
+            mean_rwr_consistency = np.mean(rwr_consistencies)
+            variance_rwr_consistency = np.var(rwr_consistencies)
+            
+            mean_vn_consistency = np.mean(vn_consistencies)
+            variance_vn_consistency = np.var(vn_consistencies)
+            
+            results.append({
+                'alpha': alpha,
+                'l': l,
+                'mean_rwr_consistency': mean_rwr_consistency,
+                'variance_rwr_consistency': variance_rwr_consistency,
+                'mean_vn_consistency': mean_vn_consistency,
+                'variance_vn_consistency': variance_vn_consistency
+            })
+    
+    return results
+
+
+def visualize_consistency(results):
+    alphas = sorted(set(result['alpha'] for result in results))
+    ls = sorted(set(result['l'] for result in results))
+    
+    mean_rwr_consistencies = np.zeros((len(alphas), len(ls)))
+    variance_rwr_consistencies = np.zeros((len(alphas), len(ls)))
+    mean_vn_consistencies = np.zeros((len(alphas), len(ls)))
+    variance_vn_consistencies = np.zeros((len(alphas), len(ls)))
+    
+    for result in results:
+        alpha_idx = alphas.index(result['alpha'])
+        l_idx = ls.index(result['l'])
+        mean_rwr_consistencies[alpha_idx, l_idx] = result['mean_rwr_consistency']
+        variance_rwr_consistencies[alpha_idx, l_idx] = result['variance_rwr_consistency']
+        mean_vn_consistencies[alpha_idx, l_idx] = result['mean_vn_consistency']
+        variance_vn_consistencies[alpha_idx, l_idx] = result['variance_vn_consistency']
+    
+    fig, ax = plt.subplots(2, 2, figsize=(12, 10))
+    
+    # Plot mean RWR consistencies
+    im = ax[0, 0].imshow(mean_rwr_consistencies, cmap='viridis', aspect='auto')
+    ax[0, 0].set_xticks(np.arange(len(ls)))
+    ax[0, 0].set_yticks(np.arange(len(alphas)))
+    ax[0, 0].set_xticklabels(ls)
+    ax[0, 0].set_yticklabels(alphas)
+    ax[0, 0].set_xlabel('l')
+    ax[0, 0].set_ylabel('alpha')
+    ax[0, 0].set_title('Mean RWR Consistency')
+    fig.colorbar(im, ax=ax[0, 0])
+    
+    # Plot variance RWR consistencies
+    im = ax[0, 1].imshow(variance_rwr_consistencies, cmap='viridis', aspect='auto')
+    ax[0, 1].set_xticks(np.arange(len(ls)))
+    ax[0, 1].set_yticks(np.arange(len(alphas)))
+    ax[0, 1].set_xticklabels(ls)
+    ax[0, 1].set_yticklabels(alphas)
+    ax[0, 1].set_xlabel('l')
+    ax[0, 1].set_ylabel('alpha')
+    ax[0, 1].set_title('Variance RWR Consistency')
+    fig.colorbar(im, ax=ax[0, 1])
+    
+    # Plot mean VN consistencies
+    im = ax[1, 0].imshow(mean_vn_consistencies, cmap='viridis', aspect='auto')
+    ax[1, 0].set_xticks(np.arange(len(ls)))
+    ax[1, 0].set_yticks(np.arange(len(alphas)))
+    ax[1, 0].set_xticklabels(ls)
+    ax[1, 0].set_yticklabels(alphas)
+    ax[1, 0].set_xlabel('l')
+    ax[1, 0].set_ylabel('alpha')
+    ax[1, 0].set_title('Mean VN Consistency')
+    fig.colorbar(im, ax=ax[1, 0])
+    
+    # Plot variance VN consistencies
+    im = ax[1, 1].imshow(variance_vn_consistencies, cmap='viridis', aspect='auto')
+    ax[1, 1].set_xticks(np.arange(len(ls)))
+    ax[1, 1].set_yticks(np.arange(len(alphas)))
+    ax[1, 1].set_xticklabels(ls)
+    ax[1, 1].set_yticklabels(alphas)
+    ax[1, 1].set_xlabel('l')
+    ax[1, 1].set_ylabel('alpha')
+    ax[1, 1].set_title('Variance VN Consistency')
+    fig.colorbar(im, ax=ax[1, 1])
+    
+    plt.tight_layout()
+    plt.show()
+
+
 def main():
     graph_file_path = 'graph.csv'
+
+
+    # Problem 3c
+    labels_file_path = 'nodelabels.csv'
     
-    # Problem 3
+    alpha_values = [0.1, 0.3, 0.5, 0.7, 0.9]
+    l_values = [1, 2, 3, 4, 5]
+    
+    results = compare_consistency(graph_file_path, labels_file_path, alpha_values=alpha_values, l_values=l_values)
+    
+    for result in results:
+        print(f"Alpha: {result['alpha']}, l: {result['l']}, Mean RWR Consistency: {result['mean_rwr_consistency']}, Variance RWR Consistency: {result['variance_rwr_consistency']}, Mean VN Consistency: {result['mean_vn_consistency']}, Variance VN Consistency: {result['variance_vn_consistency']}")
+    
+    visualize_consistency(results)
+
+    # Problem 3b
+    # alpha_values = [0.1, 0.3, 0.5, 0.7, 0.9]
+    # l_values = [1, 2, 3, 4, 5]
+    
+    # results = compare_proximity_vectors(graph_file_path, alpha_values=alpha_values, l_values=l_values)
+    
+    # for result in results:
+    #     print(f"Alpha: {result['alpha']}, l: {result['l']}, Mean Similarity: {result['mean_similarity']}, Variance of Similarity: {result['variance_similarity']}")
+    
+    # visualize_similarity(results)
+
+
+    # Problem 3a
     # results = compare_runtimes(graph_file_path)
     # print("Random Walk with Restarts (RWR):")
     # print(f"Mean runtime: {results['rwr_mean']} seconds")
